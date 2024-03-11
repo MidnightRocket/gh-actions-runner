@@ -1,0 +1,128 @@
+version: "3"
+services:
+  docker:
+    image: "docker.io/docker:dind"
+    privileged: true
+    read_only: true
+    init: true
+    restart: "unless-stopped"
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      DOCKER_TLS_CERTDIR: "/certs"
+    volumes:
+      - type: bind
+        source: "./etc/docker"
+        target: "/etc/docker"
+        read_only: true
+      - type: tmpfs
+        target: "/var/run"
+        tmpfs:
+          size: "1G"
+      - type: tmpfs
+        target: "/var/log"
+        tmpfs:
+          size: "512MB"
+      - type: volume
+        source: "docker_data"
+        target: "/var/lib/docker"
+      - type: volume
+        source: "docker_volumes"
+        target: "/var/lib/docker/volumes"
+      - type: volume
+        source: "docker_certs"
+        target: "/certs"
+      - type: volume
+        source: "docker_client_certs"
+        target: "/certs/client"
+      - type: volume
+        source: "runner_workdir"
+        target: "/_work"
+      - type: volume
+        source: "runner_externals"
+        target: "/gh-runner/externals"
+        read_only: true
+
+  runner:
+    build: "./images/runner/"
+    restart: "unless-stopped"
+    stop_grace_period: "30s"
+    scale: 1
+    env_file: ".env"
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      docker:
+        restart: true
+        condition: service_started
+      token-fetcher:
+        restart: true
+        condition: service_started
+    environment:
+      DOCKER_TLS_VERIFY: 1
+      DOCKER_CERT_PATH: "/certs/client"
+      DOCKER_HOST: "tcp://docker:2376"
+    volumes:
+      - type: volume
+        source: "docker_client_certs"
+        target: "/certs/client"
+        read_only: true
+      - type: volume
+        source: "runner_workdir"
+        target: "/_work"
+      - type: volume
+        source: "runner_externals"
+        target: "/gh-runner/externals"
+      - type: volume
+        source: "token_endpoint"
+        target: "/token-endpoint"
+
+  token-fetcher:
+    build: "./images/token-fetcher/"
+    init: true
+    read_only: true
+    env_file: ".env"
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      docker:
+        restart: true
+        condition: service_started
+    secrets:
+      - source: pat-token
+        target: pat.token
+    environment:
+      DOCKER_TLS_VERIFY: 1
+      DOCKER_CERT_PATH: "/certs/client"
+      DOCKER_HOST: "tcp://docker:2376"
+    volumes:
+      - type: volume
+        source: "docker_client_certs"
+        target: "/certs/client"
+        read_only: true
+      - type: tmpfs
+        target: "/tmp"
+        tmpfs:
+          size: "1MB"
+      - type: volume
+        source: "token_cache"
+        target: "/tmp/token-cache"
+      - type: volume
+        source: "token_endpoint"
+        target: "/token-endpoint"
+
+
+
+volumes:
+  docker_volumes:
+  docker_data:
+  docker_certs:
+  docker_client_certs:
+  runner_workdir:
+  runner_externals:
+  token_endpoint:
+  token_cache:
+
+secrets:
+  pat-token:
+    file: "./secrets/pat.token"
